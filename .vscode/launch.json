@@ -1,0 +1,64 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in library 'v8-heap-parser'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=v8-heap-parser"
+        ],
+        "filter": {
+          "name": "v8-heap-parser",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'v8-heap'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=v8-heap",
+          "--package=v8-heap-cli"
+        ],
+        "filter": {
+          "name": "v8-heap",
+          "kind": "bin"
+        }
+      },
+      "args": ["v8-heap-parser/test/basic.heapsnapshot"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'v8-heap'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=v8-heap",
+          "--package=v8-heap-cli"
+        ],
+        "filter": {
+          "name": "v8-heap",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

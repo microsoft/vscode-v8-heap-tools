@@ -1,0 +1,5 @@
+[workspace]
+members = ["v8-heap-parser", "v8-heap-cli"]
+
+[patch.crates-io]
+v8-heap-parser = { path = "v8-heap-parser" }
