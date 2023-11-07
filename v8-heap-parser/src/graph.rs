@@ -1,12 +1,11 @@
-use std::{cell::UnsafeCell, collections::VecDeque};
+use std::{
+    cell::UnsafeCell,
+    collections::{HashMap, HashSet, VecDeque},
+};
 
 use petgraph::visit::EdgeRef;
 
 use crate::decoder::*;
-
-struct DominatorInfo {
-    dominates: Vec<usize>,
-}
 
 /// Maps node indices to and back from the DFS order.
 struct PostOrder {
@@ -16,6 +15,11 @@ struct PostOrder {
     order_to_index: Vec<usize>,
 }
 
+struct DominatedNodes {
+    first_dom_node_index: Vec<usize>,
+    dominated_nodes: Vec<usize>,
+}
+
 struct Retaining {
     nodes: Vec<usize>,
     edges: Vec<usize>,
@@ -23,14 +27,30 @@ struct Retaining {
     first_edge: Vec<usize>,
 }
 
+pub struct ClassGroup {
+    pub index: usize,
+    pub self_size: u64,
+    pub retained_size: u64,
+    pub nodes: Vec<usize>,
+}
+
 pub struct Graph {
+    // Much of the code in the Graph is based on that in the Chrome DevTools
+    // (see LICENSE). We used Github Copilot to do the bulk of the translation from
+    // TypeScript to Rust, with ample hand-editing afterwards. Chrome DevTools
+    // prefers to store all node/edge information in equivalently-lengthed arrays,
+    // which makes V8 very happy. In native code, we can do things a little more
+    // efficiently, but there's still chunks of the graph that mirror devtools and
+    // could be made more idiomatic.
     pub(crate) inner: GraphInner,
     root_index: usize,
-    dominators: UnsafeCell<Option<DominatorInfo>>,
+    dominators: UnsafeCell<Option<Vec<usize>>>,
     retained_sizes: UnsafeCell<Option<Vec<u64>>>,
     flags: UnsafeCell<Option<Flags>>,
     retainers: UnsafeCell<Option<Retaining>>,
     post_order: UnsafeCell<Option<PostOrder>>,
+    dominated_nodes: UnsafeCell<Option<DominatedNodes>>,
+    class_groups: UnsafeCell<Option<Vec<ClassGroup>>>,
 }
 
 mod flag {
@@ -57,6 +77,8 @@ impl Graph {
             retainers: UnsafeCell::new(None),
             post_order: UnsafeCell::new(None),
             flags: UnsafeCell::new(None),
+            dominated_nodes: UnsafeCell::new(None),
+            class_groups: UnsafeCell::new(None),
         }
     }
 
@@ -110,11 +132,10 @@ impl Graph {
             }
 
             let post_order = &self.get_post_order().order_to_index;
-            println!("last is {}", post_order[post_order.len() - 1]);
             let dom = self.get_dominators();
             for i in post_order.iter() {
                 if *i != self.root_index {
-                    rs[*i] += rs[dom.dominates[*i]];
+                    rs[dom[*i]] += rs[*i];
                 }
             }
 
@@ -122,6 +143,113 @@ impl Graph {
         }
 
         retained_sizes.as_ref().unwrap()[node_index]
+    }
+
+    fn get_dominated_nodes(&self) -> &DominatedNodes {
+        let dominated_nodes_o = unsafe { &mut *self.dominated_nodes.get() };
+
+        if dominated_nodes_o.is_none() {
+            let graph = self.graph();
+            let mut dominated_nodes = vec![0; graph.node_count()];
+            let mut first_dom_node_index = vec![0; graph.node_count() + 1];
+
+            let dominators_tree = self.get_dominators();
+            let range = match self.root_index {
+                0 => 1..graph.node_count(),
+                i if i == graph.node_count() - 1 => 0..graph.node_count() - 1,
+                i => panic!("expected root index to be first or last, was {}", i),
+            };
+
+            // clone the range as it's used again later
+            for node_index in range.clone() {
+                first_dom_node_index[dominators_tree[node_index]] += 1;
+            }
+
+            let mut first_dominated_node_index = 0;
+            for i in 0..graph.node_count() {
+                let dominated_count = first_dom_node_index[i];
+                if i < graph.node_count() - 1 {
+                    dominated_nodes[first_dominated_node_index] = dominated_count;
+                }
+                first_dom_node_index[i] = first_dominated_node_index;
+                first_dominated_node_index += dominated_count;
+            }
+            first_dom_node_index[graph.node_count()] = dominated_nodes.len() - 1;
+
+            for node_index in range {
+                let dominator_ordinal = dominators_tree[node_index];
+                let mut dominated_ref_index = first_dom_node_index[dominator_ordinal];
+                dominated_nodes[dominated_ref_index] -= 1;
+                dominated_ref_index += dominated_nodes[dominated_ref_index];
+                dominated_nodes[dominated_ref_index] = node_index;
+            }
+
+            *dominated_nodes_o = Some(DominatedNodes {
+                dominated_nodes,
+                first_dom_node_index,
+            });
+        }
+
+        dominated_nodes_o.as_ref().unwrap()
+    }
+
+    /// Gets top-level groups for classes to show in a summary view.
+    pub fn get_class_groups(&self) -> &[ClassGroup] {
+        let class_groups = unsafe { &mut *self.class_groups.get() };
+
+        if class_groups.is_none() {
+            let dominators = self.get_dominated_nodes();
+            let nodes = self.nodes();
+            let mut queue = VecDeque::new();
+            let mut sizes = vec![-1];
+            let mut classes = vec![];
+            queue.push_back(self.root_index);
+
+            let mut groups = HashMap::new();
+            let mut seen_groups: HashSet<&str> = HashSet::new();
+            while let Some(node_index) = queue.pop_back() {
+                let node = &nodes[node_index];
+                let name = node.weight.class_name();
+                let seen = seen_groups.contains(name);
+
+                let dominated_index_from = dominators.first_dom_node_index[node_index];
+                let dominated_index_to = dominators.first_dom_node_index[node_index + 1];
+
+                if !seen
+                    && (node.weight.self_size != 0 || matches!(node.weight.typ, NodeType::Native))
+                {
+                    let group = groups.entry(name).or_insert(ClassGroup {
+                        index: node_index,
+                        self_size: 0,
+                        retained_size: 0,
+                        nodes: vec![],
+                    });
+
+                    group.retained_size += self.retained_size(node_index);
+                    group.self_size += node.weight.self_size;
+                    group.nodes.push(node_index);
+                    if dominated_index_from != dominated_index_to {
+                        seen_groups.insert(name);
+                        sizes.push(queue.len() as isize);
+                        classes.push(name);
+                    }
+                }
+
+                for i in dominated_index_from..dominated_index_to {
+                    queue.push_back(dominators.dominated_nodes[i]);
+                }
+
+                let l = queue.len();
+                while sizes.last().map(|s| *s) == Some(l as isize) {
+                    sizes.pop();
+                    seen_groups.remove(classes.pop().unwrap());
+                }
+            }
+
+            *class_groups = Some(groups.into_values().collect());
+        }
+
+        class_groups.as_ref().unwrap()
     }
 
     fn get_retainers(&self) -> &Retaining {
@@ -173,7 +301,7 @@ impl Graph {
         retaining.as_ref().unwrap()
     }
 
-    fn get_dominators(&self) -> &DominatorInfo {
+    fn get_dominators(&self) -> &Vec<usize> {
         let dominators = unsafe { &mut *self.dominators.get() };
         if dominators.is_none() {
             *dominators = Some(self.build_dominators());
@@ -394,7 +522,7 @@ impl Graph {
         }
     }
 
-    fn build_dominators(&self) -> DominatorInfo {
+    fn build_dominators(&self) -> Vec<usize> {
         let post_order = self.get_post_order();
         let graph = self.graph();
 
@@ -500,9 +628,7 @@ impl Graph {
             dominators_tree[node_index] = post_order.order_to_index[dominated_by];
         }
 
-        DominatorInfo {
-            dominates: dominators_tree,
-        }
+        dominators_tree
     }
 }
 

@@ -1,7 +1,7 @@
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
-use bumpalo::{collections, Bump};
 use ouroboros::self_referencing;
+use typed_arena::Arena;
 
 use crate::{
     error::{Error, Result},
@@ -57,7 +57,7 @@ pub(crate) type PetGraph<'a> = petgraph::Graph<Node<'a>, PGNodeEdge<'a>>;
 
 #[self_referencing]
 pub(crate) struct GraphInner {
-    arena: Bump,
+    arena: Arena<String>,
     #[borrows(arena)]
     #[covariant]
     inner_nodes: Result<PetGraph<'this>>,
@@ -87,6 +87,13 @@ impl<'a> Node<'a> {
     pub(crate) fn is_document_dom_trees_root(&self) -> bool {
         self.typ == NodeType::Syntheic && self.name == "(Document DOM trees)'"
     }
+
+    pub fn class_name(&self) -> &'a str {
+        match &self.typ {
+            NodeType::Object | NodeType::Native => self.name,
+            t => t.as_class_name(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -109,6 +116,25 @@ pub enum NodeType<'a> {
 }
 
 impl<'a> NodeType<'a> {
+    fn as_class_name(&self) -> &'static str {
+        match self {
+            Self::Hidden => "(system)",
+            Self::Array => "(array)",
+            Self::String => "(string)",
+            Self::Object => "(object)",
+            Self::Code => "(compiled code)",
+            Self::Closure => "(closure)",
+            Self::RegExp => "(regexp)",
+            Self::Number => "(number)",
+            Self::Native => "(native)",
+            Self::Syntheic => "(synthetic)",
+            Self::ConcatString => "(concatenated string)",
+            Self::SliceString => "(sliced string)",
+            Self::BigInt => "(bigint)",
+            Self::Other(_) => "(unknown)",
+        }
+    }
+
     fn from_str_in_arena(strings: &mut Strings<'a>, typ: &str) -> Self {
         match typ {
             "hidden" => Self::Hidden,
@@ -215,16 +241,16 @@ pub fn decode_str(input: &str) -> Result<Graph> {
 }
 
 struct Strings<'a> {
-    bump: &'a Bump,
-    indexed: collections::Vec<'a, &'a str>,
-    additional: std::collections::HashMap<String, &'a str>,
+    bump: &'a Arena<String>,
+    indexed: Vec<&'a str>,
+    additional: HashMap<String, &'a str>,
 }
 
 impl<'a> Strings<'a> {
     pub fn indexed(&mut self, index: usize) -> Result<&'a str> {
         match self.indexed.get(index) {
             Some(i) => Ok(*i),
-            None => Err(Error::StringOutOfBounds(index)),
+            None => Ok(self.additional("<missing>")),
         }
     }
 
@@ -232,7 +258,7 @@ impl<'a> Strings<'a> {
         match self.additional.get(input) {
             Some(i) => i,
             None => {
-                let str = self.bump.alloc_str(input);
+                let str = self.bump.alloc(input.to_string());
                 self.additional.insert(input.to_string(), str);
                 str
             }
@@ -240,16 +266,16 @@ impl<'a> Strings<'a> {
     }
 }
 
-fn alloc_strs<'a>(bump: &'a Bump, strs: &[String]) -> Strings<'a> {
-    let mut v = collections::Vec::with_capacity_in(strs.len(), bump);
+fn alloc_strs<'a>(bump: &'a Arena<String>, strs: Vec<String>) -> Strings<'a> {
+    let mut v = Vec::with_capacity(strs.len());
     for s in strs {
-        v.push(&*bump.alloc_str(s));
+        v.push(bump.alloc(s).as_str());
     }
 
     Strings {
         bump,
         indexed: v,
-        additional: std::collections::HashMap::new(),
+        additional: HashMap::new(),
     }
 }
 
@@ -382,12 +408,15 @@ fn alloc_edges<'a>(
     Ok(graph)
 }
 
-fn decode_inner(root: raw::Root) -> Result<Graph> {
+fn decode_inner(mut root: raw::Root) -> Result<Graph> {
     let root_index = root.snapshot.root_index.unwrap_or_default();
     let mut built = GraphInnerBuilder {
-        arena: Bump::new(),
-        inner_nodes_builder: |arena: &Bump| {
-            let mut strs = alloc_strs(arena, &root.strings);
+        arena: Arena::new(),
+        inner_nodes_builder: |arena| {
+            let mut strs = Vec::new();
+            std::mem::swap(&mut strs, &mut root.strings);
+
+            let mut strs = alloc_strs(arena, strs);
             alloc_nodes(&root, &mut strs)
         },
     }
