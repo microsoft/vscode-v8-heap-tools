@@ -266,7 +266,7 @@ impl<'a> Strings<'a> {
     }
 }
 
-fn alloc_strs<'a>(bump: &'a Arena<String>, strs: Vec<String>) -> Strings<'a> {
+fn alloc_strs(bump: &Arena<String>, strs: Vec<String>) -> Strings<'_> {
     let mut v = Vec::with_capacity(strs.len());
     for s in strs {
         v.push(bump.alloc(s).as_str());

@@ -13,3 +13,4 @@ thiserror = "1.0"
 v8-heap-parser = { version = "0.1.0", path = "../v8-heap-parser" }
 serde_json = "1.0"
 num-format = "0.4"
+shlex = "1.2"
