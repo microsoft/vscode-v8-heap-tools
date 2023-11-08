@@ -84,21 +84,23 @@ impl QueryOpt {
     }
 }
 
-pub struct SummaryOptions {
+pub struct SummaryOptions<'a> {
     /// Sort order
     pub sort_by: SortBy,
     /// Output format.
     pub format: Format,
     /// Graph to display
-    pub graph: Graph,
+    pub graph: &'a Graph,
     /// List of queries to apply at each level of the graph.
     pub query: Vec<QueryOpt>,
+    /// Skip calculation of retained sizes.
+    pub no_retained: bool,
 }
 
 pub fn print_summary(opts: &SummaryOptions) -> String {
     let groups = opts
         .graph
-        .get_class_groups()
+        .get_class_groups(opts.no_retained)
         .iter()
         .map(|g| TopLevelGroup {
             group: g,
@@ -109,7 +111,7 @@ pub fn print_summary(opts: &SummaryOptions) -> String {
     let mut output = String::with_capacity(1024);
     format_print_start(&mut output, opts.format);
     print_summary_inner(
-        &opts.graph,
+        opts.graph,
         opts.sort_by,
         opts.format,
         &groups,
@@ -123,24 +125,24 @@ pub fn print_summary(opts: &SummaryOptions) -> String {
 }
 
 fn format_print_start(output: &mut String, format: Format) {
-    if let Format::JSON = format {
+    if let Format::Json = format {
         output.push('[');
     }
 }
 fn format_print_end(output: &mut String, format: Format) {
-    if let Format::JSON = format {
+    if let Format::Json = format {
         output.push_str("]\n");
     }
 }
 
 fn format_print_children_start(output: &mut String, format: Format) {
-    if let Format::JSON = format {
+    if let Format::Json = format {
         output.pop(); // remove last '{'
-        output.push_str("\"children\":[");
+        output.push_str(",\"children\":[");
     }
 }
 fn format_print_children_end(output: &mut String, format: Format) {
-    if let Format::JSON = format {
+    if let Format::Json = format {
         output.push_str("]}");
     }
 }
@@ -151,10 +153,11 @@ fn format_print_node(
     format: Format,
     depth: usize,
     output: &mut String,
+    num_children: usize,
 ) {
     match format {
-        Format::JSON => {
-            if order_index > 1 {
+        Format::Json => {
+            if order_index > 0 {
                 output.push(',');
             }
             write!(
@@ -166,7 +169,6 @@ fn format_print_node(
                   "retained_size": node.retained_size(),
                   "id": node.id(),
                 })
-                .to_string()
             )
             .unwrap();
         }
@@ -175,18 +177,23 @@ fn format_print_node(
             for _ in 0..depth {
                 output.push('\t');
             }
-            writeln!(
-                output,
-                "{}. {}, self size {} / retained size {} @ {}",
-                order_index + 1,
-                if name.len() > 50 { &name[0..50] } else { name }
-                    .replace('\n', "\\n")
-                    .replace('\r', "\\r"),
-                node.shallow_size().to_formatted_string(&Locale::en),
-                node.retained_size().to_formatted_string(&Locale::en),
-                node.id(),
-            )
-            .unwrap();
+
+            output.push_str(&format!("{}. ", order_index + 1));
+            if name.len() > 50 {
+                output.push_str(&name[0..50]);
+                output.push('…');
+            } else {
+                output.push_str(name);
+            }
+            output.push_str(" self size ");
+            output.push_str(&node.shallow_size().to_formatted_string(&Locale::en));
+            output.push_str(" / retained size ");
+            output.push_str(&node.retained_size().to_formatted_string(&Locale::en));
+
+            if num_children > 0 {
+                output.push_str(&format!(" x{}", num_children));
+            }
+            output.push_str(&format!(" @ {}\n", node.id()));
         }
     }
 }
@@ -214,17 +221,19 @@ fn print_summary_inner<T>(
 
     let this_query = query.get(depth).unwrap();
 
+    let mut order_index = 0;
     for (i, index) in node_indexes.iter().enumerate() {
         let node = &nodes[*index];
         if !this_query.test(i, node) {
             continue;
         }
 
-        format_print_node(i, node, format, depth, output);
+        let children = node.children(graph);
+        format_print_node(order_index, node, format, depth, output, children.len());
+        order_index += 1;
 
         if depth + 1 < query.len() {
-            let children: Vec<NodeWithSize> = node
-                .children(&graph)
+            let children: Vec<NodeWithSize> = children
                 .into_iter()
                 .map(|i| NodeWithSize {
                     index: i,

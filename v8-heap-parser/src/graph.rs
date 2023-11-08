@@ -166,6 +166,7 @@ impl Graph {
             }
 
             let mut first_dominated_node_index = 0;
+            #[allow(clippy::needless_range_loop)]
             for i in 0..graph.node_count() {
                 let dominated_count = first_dom_node_index[i];
                 if i < graph.node_count() - 1 {
@@ -194,55 +195,64 @@ impl Graph {
     }
 
     /// Gets top-level groups for classes to show in a summary view.
-    pub fn get_class_groups(&self) -> &[ClassGroup] {
+    pub fn get_class_groups(&self, no_retained: bool) -> &[ClassGroup] {
         let class_groups = unsafe { &mut *self.class_groups.get() };
 
         if class_groups.is_none() {
-            let dominators = self.get_dominated_nodes();
             let nodes = self.nodes();
-            let mut queue = VecDeque::new();
-            let mut sizes = vec![-1];
-            let mut classes = vec![];
-            queue.push_back(self.root_index);
-
             let mut groups = HashMap::new();
-            let mut seen_groups: HashSet<&str> = HashSet::new();
-            while let Some(node_index) = queue.pop_back() {
-                let node = &nodes[node_index];
+            for (index, node) in nodes.iter().enumerate() {
                 let name = node.weight.class_name();
-                let seen = seen_groups.contains(name);
+                let group = groups.entry(name).or_insert(ClassGroup {
+                    index,
+                    self_size: 0,
+                    retained_size: 0,
+                    nodes: vec![],
+                });
 
-                let dominated_index_from = dominators.first_dom_node_index[node_index];
-                let dominated_index_to = dominators.first_dom_node_index[node_index + 1];
+                group.self_size += node.weight.self_size;
+                group.nodes.push(index);
+            }
 
-                if !seen
-                    && (node.weight.self_size != 0 || matches!(node.weight.typ, NodeType::Native))
-                {
-                    let group = groups.entry(name).or_insert(ClassGroup {
-                        index: node_index,
-                        self_size: 0,
-                        retained_size: 0,
-                        nodes: vec![],
-                    });
+            if !no_retained {
+                let dominators = self.get_dominated_nodes();
+                let mut queue = VecDeque::new();
+                let mut sizes = vec![-1];
+                let mut classes = vec![];
+                queue.push_back(self.root_index);
 
-                    group.retained_size += self.retained_size(node_index);
-                    group.self_size += node.weight.self_size;
-                    group.nodes.push(node_index);
-                    if dominated_index_from != dominated_index_to {
-                        seen_groups.insert(name);
-                        sizes.push(queue.len() as isize);
-                        classes.push(name);
+                let mut seen_groups: HashSet<&str> = HashSet::new();
+                while let Some(node_index) = queue.pop_back() {
+                    let node = &nodes[node_index];
+                    let name = node.weight.class_name();
+                    let seen = seen_groups.contains(name);
+
+                    let dominated_index_from = dominators.first_dom_node_index[node_index];
+                    let dominated_index_to = dominators.first_dom_node_index[node_index + 1];
+
+                    if !seen
+                        && (node.weight.self_size != 0
+                            || matches!(node.weight.typ, NodeType::Native))
+                    {
+                        // group must eexist from built groups above
+                        let group = groups.get_mut(name).unwrap();
+                        group.retained_size += self.retained_size(node_index);
+                        if dominated_index_from != dominated_index_to {
+                            seen_groups.insert(name);
+                            sizes.push(queue.len() as isize);
+                            classes.push(name);
+                        }
                     }
-                }
 
-                for i in dominated_index_from..dominated_index_to {
-                    queue.push_back(dominators.dominated_nodes[i]);
-                }
+                    for i in dominated_index_from..dominated_index_to {
+                        queue.push_back(dominators.dominated_nodes[i]);
+                    }
 
-                let l = queue.len();
-                while sizes.last().map(|s| *s) == Some(l as isize) {
-                    sizes.pop();
-                    seen_groups.remove(classes.pop().unwrap());
+                    let l = queue.len();
+                    while sizes.last().copied() == Some(l as isize) {
+                        sizes.pop();
+                        seen_groups.remove(classes.pop().unwrap());
+                    }
                 }
             }
 

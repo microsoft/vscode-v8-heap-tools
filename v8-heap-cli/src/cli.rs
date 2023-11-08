@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use clap::Parser;
 
 #[derive(Parser)]
@@ -30,8 +32,17 @@ pub struct Cli {
     pub depth: usize,
 
     /// How many nodes to print.
-    #[arg(short, long, default_value = "50")]
+    #[arg(short, long, default_value = "10")]
     pub top: usize,
+
+    /// Skip calculation of retained sizes.
+    #[arg(long)]
+    pub no_retained: bool,
+
+    /// Allows specifying multiple operations to take in series on the graph.
+    /// For example, "--op '-t 10' --op '-g MyObject'"
+    #[arg(long)]
+    pub op: Vec<String>,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy)]
@@ -43,5 +54,14 @@ pub enum SortBy {
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum Format {
     Text,
-    JSON,
+    Json,
+}
+
+impl Display for Format {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Format::Text => write!(f, "text"),
+            Format::Json => write!(f, "json"),
+        }
+    }
 }
