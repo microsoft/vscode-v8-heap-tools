@@ -1,11 +1,14 @@
 use std::{
     cell::UnsafeCell,
     collections::{HashMap, HashSet, VecDeque},
+    rc::Rc,
 };
 
+use crate::decoder::*;
 use petgraph::visit::EdgeRef;
 
-use crate::decoder::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 
 /// Maps node indices to and back from the DFS order.
 struct PostOrder {
@@ -27,6 +30,8 @@ struct Retaining {
     first_edge: Vec<usize>,
 }
 
+#[derive(Clone)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
 pub struct ClassGroup {
     pub index: usize,
     pub self_size: u64,
@@ -34,6 +39,7 @@ pub struct ClassGroup {
     pub nodes: Vec<usize>,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Graph {
     // Much of the code in the Graph is based on that in the Chrome DevTools
     // (see LICENSE). We used Github Copilot to do the bulk of the translation from
@@ -42,8 +48,8 @@ pub struct Graph {
     // which makes V8 very happy. In native code, we can do things a little more
     // efficiently, but there's still chunks of the graph that mirror devtools and
     // could be made more idiomatic.
-    pub(crate) inner: GraphInner,
-    root_index: usize,
+    pub(crate) inner: Rc<GraphInner>,
+    pub root_index: usize,
     dominators: UnsafeCell<Option<Vec<usize>>>,
     retained_sizes: UnsafeCell<Option<Vec<u64>>>,
     flags: UnsafeCell<Option<Flags>>,
@@ -67,10 +73,97 @@ impl Flags {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = Node)]
+pub struct WasmNode {
+    graph: Rc<GraphInner>,
+
+    pub self_size: u64,
+    pub index: usize,
+    pub typ: u8,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl WasmNode {
+    pub(crate) fn maybe_new(graph: Rc<GraphInner>, index: usize) -> Option<Self> {
+        let (self_size, typ) = {
+            let node = graph.borrow().raw_nodes().get(index)?;
+            (node.weight.self_size, node.weight.typ.into())
+        };
+
+        Some(Self {
+            index,
+            graph,
+            self_size,
+            typ,
+        })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_class = Node)]
+impl WasmNode {
+    /// Gets the node's string name.
+    pub fn name(&self) -> String {
+        self.graph.borrow().raw_nodes()[self.index]
+            .weight
+            .name
+            .to_string()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Graph {
+    /// Gets a range of class groups, sorted by retained size.
+    #[wasm_bindgen(js_name = get_class_groups)]
+    pub fn get_class_groups_wasm(
+        &self,
+        start: usize,
+        end: usize,
+        sort_by_retained: bool,
+    ) -> Vec<ClassGroup> {
+        let groups = self.get_class_groups(false);
+        let range = start..std::cmp::min(end, groups.len());
+        if !sort_by_retained {
+            let mut indices = (0..groups.len()).collect::<Vec<_>>();
+            indices.sort_by_key(|g| std::cmp::Reverse(groups[*g].self_size));
+            return indices[range].iter().map(|i| groups[*i].clone()).collect();
+        }
+
+        groups[range].to_vec()
+    }
+
+    /// Gets a list of nodes by their index.
+    #[wasm_bindgen(js_name = get_nodes)]
+    pub fn get_nodes_wasm(&self, nodes: &[usize]) -> Vec<WasmNode> {
+        nodes
+            .iter()
+            .flat_map(|n| WasmNode::maybe_new(self.inner.clone(), *n))
+            .collect()
+    }
+
+    /// Gets a list children of the node at the given index. The return value
+    /// is a list of numbers where the top 8 bits are the edge type, and the
+    /// remaining bits are the node index.
+    #[wasm_bindgen(js_name = children)]
+    pub fn children_wasm(&self, parent: usize) -> Vec<u64> {
+        let graph = self.graph();
+
+        graph
+            .edges(petgraph::graph::NodeIndex::new(parent))
+            .map(|n| {
+                let typ: u8 = n.weight().typ.into();
+                (n.target().index() as u64) | ((typ as u64) << (64 - 8))
+            })
+            .collect()
+    }
+}
+
 impl Graph {
     pub(crate) fn new(inner: GraphInner, root_index: usize) -> Self {
         Self {
-            inner,
+            inner: Rc::new(inner),
             root_index,
             dominators: UnsafeCell::new(None),
             retained_sizes: UnsafeCell::new(None),
@@ -194,7 +287,8 @@ impl Graph {
         dominated_nodes_o.as_ref().unwrap()
     }
 
-    /// Gets top-level groups for classes to show in a summary view.
+    /// Gets top-level groups for classes to show in a summary view. Sorted by
+    /// retained size descending by default.
     pub fn get_class_groups(&self, no_retained: bool) -> &[ClassGroup] {
         let class_groups = unsafe { &mut *self.class_groups.get() };
 
@@ -256,7 +350,9 @@ impl Graph {
                 }
             }
 
-            *class_groups = Some(groups.into_values().collect());
+            let mut groups: Vec<_> = groups.into_values().collect();
+            groups.sort_by_key(|g| std::cmp::Reverse(g.retained_size));
+            *class_groups = Some(groups);
         }
 
         class_groups.as_ref().unwrap()

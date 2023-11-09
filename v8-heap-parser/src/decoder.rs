@@ -1,7 +1,9 @@
-use std::{collections::HashMap, fmt::Display};
-
 use ouroboros::self_referencing;
+use std::{collections::HashMap, fmt::Display};
 use typed_arena::Arena;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 
 use crate::{
     error::{Error, Result},
@@ -96,7 +98,7 @@ impl<'a> Node<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[non_exhaustive]
 pub enum NodeType<'a> {
     Hidden,
@@ -113,6 +115,27 @@ pub enum NodeType<'a> {
     SliceString,
     BigInt,
     Other(&'a str),
+}
+
+impl<'a> From<NodeType<'a>> for u8 {
+    fn from(t: NodeType<'a>) -> u8 {
+        match t {
+            NodeType::Hidden => 0,
+            NodeType::Array => 1,
+            NodeType::String => 2,
+            NodeType::Object => 3,
+            NodeType::Code => 4,
+            NodeType::Closure => 5,
+            NodeType::RegExp => 6,
+            NodeType::Number => 7,
+            NodeType::Native => 8,
+            NodeType::Syntheic => 9,
+            NodeType::ConcatString => 10,
+            NodeType::SliceString => 11,
+            NodeType::BigInt => 12,
+            NodeType::Other(_) => 13,
+        }
+    }
 }
 
 impl<'a> NodeType<'a> {
@@ -178,6 +201,7 @@ pub enum NameOrIndex<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
+#[repr(u8)]
 pub enum EdgeType<'a> {
     Context,
     Element,
@@ -188,6 +212,22 @@ pub enum EdgeType<'a> {
     Weak,
     Invisible,
     Other(&'a str),
+}
+
+impl<'a> From<EdgeType<'a>> for u8 {
+    fn from(t: EdgeType<'a>) -> u8 {
+        match t {
+            EdgeType::Context => 0,
+            EdgeType::Element => 1,
+            EdgeType::Property => 2,
+            EdgeType::Internal => 3,
+            EdgeType::Hidden => 4,
+            EdgeType::Shortcut => 5,
+            EdgeType::Weak => 6,
+            EdgeType::Invisible => 7,
+            EdgeType::Other(_) => 8,
+        }
+    }
 }
 
 impl<'a> Display for EdgeType<'a> {
@@ -238,6 +278,12 @@ pub fn decode_str(input: &str) -> Result<Graph> {
     serde_json::from_str(input)
         .map_err(Error::DecodeError)
         .and_then(decode_inner)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn decode_bytes(input: &[u8]) -> std::result::Result<Graph, String> {
+    decode_slice(input).map_err(|e| e.to_string())
 }
 
 struct Strings<'a> {

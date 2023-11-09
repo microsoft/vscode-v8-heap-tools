@@ -1,0 +1,12 @@
+{
+  "name": "@vscode/v8-heap-parser",
+  "version": "1.0.0",
+  "description": "Parses V8 heap snapshots",
+  "main": "pkg/v8_heap_parser.js",
+  "scripts": {
+    "compile": "wasm-pack build --target bundler --no-pack",
+    "prepack": "npm run compile -- --release && node -e \"fs.unlinkSync('./pkg/.gitignore')\""
+  },
+  "author": "Connor Peet",
+  "license": "BSD-3-Clause"
+}
