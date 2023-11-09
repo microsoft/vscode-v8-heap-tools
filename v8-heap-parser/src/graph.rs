@@ -606,6 +606,17 @@ impl Graph {
             stack_top = 0;
             stack_nodes[0] = self.root_index;
             stack_current_edge[0] = retainers.first_edge[self.root_index + 1];
+
+            for (i, did_visit) in visited.iter_mut().enumerate() {
+                if *did_visit || !self.has_only_weak_retainers(i) {
+                    continue;
+                }
+
+                stack_top += 1;
+                stack_nodes[stack_top] = i;
+                stack_current_edge[stack_top] = retainers.first_edge[i];
+                *did_visit = true;
+            }
         }
 
         if post_order_index != node_count {
@@ -731,10 +742,31 @@ impl Graph {
         let mut dominators_tree = vec![0; nodes_count];
         for (post_order_index, dominated_by) in dominators.into_iter().enumerate() {
             let node_index = post_order.order_to_index[post_order_index];
-            dominators_tree[node_index] = post_order.order_to_index[dominated_by];
+            // detached nodes are not in the dominators tree, so have them be
+            // dominated solely by the root.
+            dominators_tree[node_index] = post_order
+                .order_to_index
+                .get(dominated_by)
+                .copied()
+                .unwrap_or(self.root_index);
         }
 
         dominators_tree
+    }
+
+    fn has_only_weak_retainers(&self, node_index: usize) -> bool {
+        let ret = self.get_retainers();
+        let graph = self.graph();
+        for retainer in ret.first_retainer[node_index]..ret.first_retainer[node_index + 1] {
+            if let Some(e) = graph.edge_weight(petgraph::graph::EdgeIndex::new(ret.edges[retainer]))
+            {
+                if !matches!(e.typ, EdgeType::Weak | EdgeType::Shortcut) {
+                    return false;
+                }
+            }
+        }
+
+        true
     }
 }
 
@@ -750,5 +782,45 @@ impl<'a, 'graph> Iterator for NodeIterator<'a, 'graph> {
         let n = self.graph.raw_nodes().get(self.index).map(|n| &n.weight);
         self.index += 1;
         n
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_retained_sizes() {
+        let contents = fs::read("test/basic.heapsnapshot").unwrap();
+        let graph = decode_slice(&contents).expect("expect no errors");
+
+        let mut groups = graph.get_class_groups(false).to_vec();
+        groups.sort_by_key(|g| std::cmp::Reverse(g.retained_size));
+
+        let mut actual = String::new();
+        for group in groups.iter().take(10) {
+            actual.push_str(&format!(
+                "{} {} {}\n",
+                group.retained_size,
+                group.nodes.len(),
+                graph.get_node(group.index).unwrap().class_name()
+            ));
+        }
+
+        assert_eq!(
+            actual,
+            "3413384 18983 (compiled code)
+2347408 13774 (string)
+2301824 6714 (closure)
+1555120 1186 (array)
+1396568 811 Object
+1266788 757 system / Context
+985128 12345 (system)
+651840 29 Map
+340240 322 BuiltinModule
+325872 3 global
+"
+        );
     }
 }

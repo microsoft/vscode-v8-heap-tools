@@ -1,0 +1,25 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.73
+        components: clippy
+
+    - name: Run tests
+      run: cargo test
+
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
