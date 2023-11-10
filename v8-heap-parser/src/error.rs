@@ -13,7 +13,7 @@ pub enum Error {
     #[error("expected to find a field for '{0}', but we didn't")]
     MissingField(&'static str),
     #[error("missing node {0} in an edge")]
-    MissingNodeEdge(u64),
+    MissingNodeEdge(u32),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

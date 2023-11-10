@@ -75,14 +75,11 @@ impl GraphInner {
 pub struct Node<'a> {
     pub typ: NodeType<'a>,
     pub name: &'a str,
-    pub id: u64,
+    pub id: u32,
     pub self_size: u64,
-    pub edge_count: u64,
+    pub edge_count: usize,
     pub trace_node_id: u64,
-    pub detachedness: u64,
-
-    pub edges_outgoing: Vec<usize>,
-    pub edges_incoming: Vec<usize>,
+    pub detachedness: u32,
 }
 
 impl<'a> Node<'a> {
@@ -369,17 +366,17 @@ fn alloc_nodes<'a, 'snap>(root: &'snap raw::Root, strs: &mut Strings<'a>) -> Res
                 .map(|o| root.nodes[i + o])
                 .unwrap_or_default(),
             edge_count: edge_count_offset
-                .map(|o| root.nodes[i + o])
+                .map(|o| root.nodes[i + o] as usize)
                 .unwrap_or_default(),
             trace_node_id: trace_node_id_offset
                 .map(|o| root.nodes[i + o])
                 .unwrap_or_default(),
             detachedness: detachedness_offset
-                .map(|o| root.nodes[i + o])
+                .map(|o| root.nodes[i + o] as u32)
                 .unwrap_or_default(),
-            id: id_offset.map(|o| root.nodes[i + o]).unwrap_or_default(),
-            edges_incoming: Vec::new(),
-            edges_outgoing: Vec::new(),
+            id: id_offset
+                .map(|o| root.nodes[i + o] as u32)
+                .unwrap_or_default(),
         });
     }
 
@@ -432,12 +429,15 @@ fn alloc_edges<'a>(
                 &type_types[root.edges[edge_index + type_offset] as usize],
             );
 
-            let to_index = (root.edges[edge_index + to_node_offset] as usize) / node_row_size;
+            let to_index = petgraph::graph::NodeIndex::new(
+                (root.edges[edge_index + to_node_offset] as usize) / node_row_size,
+            );
+            let from_index = petgraph::graph::NodeIndex::new(from_index);
             let name_or_index = root.edges[edge_index + name_or_index_offset];
 
             edge_queue.push((
-                petgraph::graph::NodeIndex::new(from_index),
-                petgraph::graph::NodeIndex::new(to_index),
+                from_index,
+                to_index,
                 PGNodeEdge {
                     typ,
                     name: NameOrIndex::Name(strs.indexed(name_or_index as usize)?),
