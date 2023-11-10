@@ -48,7 +48,7 @@ impl<'a> SummarizableNode for TopLevelGroup<'a> {
 
 impl<'a> SummarizableNode for NodeWithSize<'a> {
     fn id(&self) -> u64 {
-        self.node.id
+        self.node.id as u64
     }
 
     fn children(&self, graph: &Graph) -> Vec<usize> {

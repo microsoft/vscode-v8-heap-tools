@@ -7,9 +7,6 @@ use std::{
 use crate::decoder::*;
 use petgraph::visit::EdgeRef;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 /// Maps node indices to and back from the DFS order.
 struct PostOrder {
     // Node index to the order in which they're iterated
@@ -31,13 +28,15 @@ struct Retaining {
 }
 
 #[derive(Clone)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
 pub struct ClassGroup {
     pub index: usize,
     pub self_size: u64,
     pub retained_size: u64,
     pub nodes: Vec<usize>,
 }
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Graph {
@@ -73,93 +72,6 @@ impl Flags {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = Node)]
-pub struct WasmNode {
-    graph: Rc<GraphInner>,
-
-    pub self_size: u64,
-    pub index: usize,
-    pub typ: u8,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl WasmNode {
-    pub(crate) fn maybe_new(graph: Rc<GraphInner>, index: usize) -> Option<Self> {
-        let (self_size, typ) = {
-            let node = graph.borrow().raw_nodes().get(index)?;
-            (node.weight.self_size, node.weight.typ.into())
-        };
-
-        Some(Self {
-            index,
-            graph,
-            self_size,
-            typ,
-        })
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_class = Node)]
-impl WasmNode {
-    /// Gets the node's string name.
-    pub fn name(&self) -> String {
-        self.graph.borrow().raw_nodes()[self.index]
-            .weight
-            .name
-            .to_string()
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl Graph {
-    /// Gets a range of class groups, sorted by retained size.
-    #[wasm_bindgen(js_name = get_class_groups)]
-    pub fn get_class_groups_wasm(
-        &self,
-        start: usize,
-        end: usize,
-        sort_by_retained: bool,
-    ) -> Vec<ClassGroup> {
-        let groups = self.get_class_groups(false);
-        let range = start..std::cmp::min(end, groups.len());
-        if !sort_by_retained {
-            let mut indices = (0..groups.len()).collect::<Vec<_>>();
-            indices.sort_by_key(|g| std::cmp::Reverse(groups[*g].self_size));
-            return indices[range].iter().map(|i| groups[*i].clone()).collect();
-        }
-
-        groups[range].to_vec()
-    }
-
-    /// Gets a list of nodes by their index.
-    #[wasm_bindgen(js_name = get_nodes)]
-    pub fn get_nodes_wasm(&self, nodes: &[usize]) -> Vec<WasmNode> {
-        nodes
-            .iter()
-            .flat_map(|n| WasmNode::maybe_new(self.inner.clone(), *n))
-            .collect()
-    }
-
-    /// Gets a list children of the node at the given index. The return value
-    /// is a list of numbers where the top 8 bits are the edge type, and the
-    /// remaining bits are the node index.
-    #[wasm_bindgen(js_name = children)]
-    pub fn children_wasm(&self, parent: usize) -> Vec<u64> {
-        let graph = self.graph();
-
-        graph
-            .edges(petgraph::graph::NodeIndex::new(parent))
-            .map(|n| {
-                let typ: u8 = n.weight().typ.into();
-                (n.target().index() as u64) | ((typ as u64) << (64 - 8))
-            })
-            .collect()
-    }
-}
-
 impl Graph {
     pub(crate) fn new(inner: GraphInner, root_index: usize) -> Self {
         Self {
@@ -189,7 +101,7 @@ impl Graph {
             .map(|n| &n.weight)
     }
 
-    fn graph(&self) -> &PetGraph<'_> {
+    pub(crate) fn graph(&self) -> &PetGraph<'_> {
         self.inner.borrow()
     }
 
@@ -374,7 +286,7 @@ impl Graph {
             let mut edge_index = 0;
             for (i, node) in graph.raw_nodes().iter().enumerate() {
                 r.first_edge[i] = edge_index;
-                edge_index += node.weight.edge_count as usize;
+                edge_index += node.weight.edge_count;
             }
 
             for edge in graph.raw_edges() {
