@@ -8,6 +8,7 @@ use wasm_bindgen::prelude::*;
 use crate::{
     error::{Error, Result},
     graph::Graph,
+    perf::PerfCounter,
 };
 
 use self::raw::StringOrArray;
@@ -112,27 +113,6 @@ pub enum NodeType<'a> {
     SliceString,
     BigInt,
     Other(&'a str),
-}
-
-impl<'a> From<NodeType<'a>> for u8 {
-    fn from(t: NodeType<'a>) -> u8 {
-        match t {
-            NodeType::Hidden => 0,
-            NodeType::Array => 1,
-            NodeType::String => 2,
-            NodeType::Object => 3,
-            NodeType::Code => 4,
-            NodeType::Closure => 5,
-            NodeType::RegExp => 6,
-            NodeType::Number => 7,
-            NodeType::Native => 8,
-            NodeType::Syntheic => 9,
-            NodeType::ConcatString => 10,
-            NodeType::SliceString => 11,
-            NodeType::BigInt => 12,
-            NodeType::Other(_) => 13,
-        }
-    }
 }
 
 impl<'a> NodeType<'a> {
@@ -260,21 +240,37 @@ impl<'a> EdgeType<'a> {
 }
 
 pub fn decode_reader(input: impl std::io::Read) -> Result<Graph> {
+    // todo@connor412: parsing the JSON takes the majority of time when parsing
+    // a graph. We might be faster if we use DeserializeSeed to parse data
+    // directly into the graph structure.
+    // https://docs.rs/serde/latest/serde/de/trait.DeserializeSeed.html
+    let perf = PerfCounter::new("json_decode");
     serde_json::from_reader(input)
         .map_err(Error::DecodeError)
-        .and_then(decode_inner)
+        .and_then(|b| {
+            drop(perf);
+            decode_inner(b)
+        })
 }
 
 pub fn decode_slice(input: &[u8]) -> Result<Graph> {
+    let perf = PerfCounter::new("json_decode");
     serde_json::from_slice(input)
         .map_err(Error::DecodeError)
-        .and_then(decode_inner)
+        .and_then(|b| {
+            drop(perf);
+            decode_inner(b)
+        })
 }
 
 pub fn decode_str(input: &str) -> Result<Graph> {
+    let perf = PerfCounter::new("json_decode");
     serde_json::from_str(input)
         .map_err(Error::DecodeError)
-        .and_then(decode_inner)
+        .and_then(|b| {
+            drop(perf);
+            decode_inner(b)
+        })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -455,6 +451,7 @@ fn alloc_edges<'a>(
 }
 
 fn decode_inner(mut root: raw::Root) -> Result<Graph> {
+    let _perf = PerfCounter::new("init_graph");
     let root_index = root.snapshot.root_index.unwrap_or_default();
     let mut built = GraphInnerBuilder {
         arena: Arena::new(),

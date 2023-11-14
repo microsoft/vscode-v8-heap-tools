@@ -1,6 +1,7 @@
 mod decoder;
 mod error;
 mod graph;
+mod perf;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

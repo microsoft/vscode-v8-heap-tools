@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::decoder::*;
+use crate::{decoder::*, perf::PerfCounter};
 use petgraph::visit::EdgeRef;
 
 /// Maps node indices to and back from the DFS order.
@@ -131,13 +131,15 @@ impl Graph {
 
         if retained_sizes.is_none() {
             let graph = self.graph();
+            let post_order = &self.get_post_order().order_to_index;
+            let dom = self.get_dominators();
+            let _perf = PerfCounter::new("build_retained_sizes");
+
             let mut rs = Vec::with_capacity(graph.node_count());
             for n in self.graph().raw_nodes() {
                 rs.push(n.weight.self_size);
             }
 
-            let post_order = &self.get_post_order().order_to_index;
-            let dom = self.get_dominators();
             for i in post_order.iter() {
                 if *i != self.root_index {
                     rs[dom[*i]] += rs[*i];
@@ -154,11 +156,12 @@ impl Graph {
         let dominated_nodes_o = unsafe { &mut *self.dominated_nodes.get() };
 
         if dominated_nodes_o.is_none() {
+            let dominators_tree = self.get_dominators();
+            let _perf = PerfCounter::new("build_dominated_nodes");
             let graph = self.graph();
             let mut dominated_nodes = vec![0; graph.node_count()];
             let mut first_dom_node_index = vec![0; graph.node_count() + 1];
 
-            let dominators_tree = self.get_dominators();
             let range = match self.root_index {
                 0 => 1..graph.node_count(),
                 i if i == graph.node_count() - 1 => 0..graph.node_count() - 1,
@@ -222,6 +225,7 @@ impl Graph {
 
             if !no_retained {
                 let dominators = self.get_dominated_nodes();
+                let _perf = PerfCounter::new("build_class_groups");
                 let mut queue = VecDeque::new();
                 let mut sizes = vec![-1];
                 let mut classes = vec![];
@@ -274,6 +278,7 @@ impl Graph {
         let retaining = unsafe { &mut *self.retainers.get() };
 
         if retaining.is_none() {
+            let _perf = PerfCounter::new("build_retainers");
             let graph = self.graph();
             let mut r = Retaining {
                 edges: vec![0; graph.edge_count()],
@@ -328,7 +333,7 @@ impl Graph {
         dominators.as_ref().unwrap()
     }
 
-    fn is_essential_edge(&self, index: usize, typ: &EdgeType<'_>) -> bool {
+    pub(crate) fn is_essential_edge(&self, index: usize, typ: &EdgeType<'_>) -> bool {
         if let EdgeType::Weak = typ {
             return false;
         }
@@ -344,6 +349,7 @@ impl Graph {
         let flags = unsafe { &mut *self.flags.get() };
 
         if flags.is_none() {
+            let _perf = PerfCounter::new("build_flags");
             let mut f = vec![0; self.graph().node_count()];
             self.mark_detached_dom_tree_nodes(&mut f);
             self.mark_queriable_heap_objects(&mut f);
@@ -381,11 +387,10 @@ impl Graph {
                     continue;
                 }
                 let typ = edge.weight.typ;
-                if typ == EdgeType::Hidden
-                    || typ == EdgeType::Invisible
-                    || typ == EdgeType::Internal
-                    || typ == EdgeType::Weak
-                {
+                if matches!(
+                    typ,
+                    EdgeType::Hidden | EdgeType::Internal | EdgeType::Invisible | EdgeType::Weak
+                ) {
                     continue;
                 }
                 list.push_back(edge.target().index());
@@ -452,6 +457,7 @@ impl Graph {
 
     fn build_post_order(&self) -> PostOrder {
         let retainers = self.get_retainers();
+        let _perf = PerfCounter::new("build_post_order");
         let graph = self.graph();
         let node_count = graph.raw_nodes().len();
         let flags = self.get_flags();
@@ -562,6 +568,7 @@ impl Graph {
         let no_entry = nodes_count;
         let mut dominators = vec![no_entry; nodes_count];
         dominators[root_post_ordered_index] = root_post_ordered_index;
+        let _perf = PerfCounter::new("build_dominators");
 
         // The affected vector is used to mark entries which dominators
         // have to be recalculated because of changes in their retainers.
