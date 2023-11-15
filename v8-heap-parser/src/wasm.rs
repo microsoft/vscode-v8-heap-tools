@@ -1,9 +1,21 @@
-use std::{cmp::min, collections::BinaryHeap, rc::Rc};
+use std::{
+    cmp::min,
+    collections::{BinaryHeap, HashSet, VecDeque},
+    rc::Rc,
+};
 
 use petgraph::visit::EdgeRef;
 use wasm_bindgen::prelude::*;
 
-use crate::{decoder::GraphInner, ClassGroup, Graph, Node};
+use crate::{
+    decoder::{GraphInner, NodeType},
+    ClassGroup, EdgeType, Graph, Node,
+};
+
+#[wasm_bindgen]
+pub fn init_panic_hook() {
+    console_error_panic_hook::set_once();
+}
 
 #[wasm_bindgen(js_name = ClassGroup)]
 pub struct WasmClassGroup {
@@ -38,6 +50,76 @@ impl WasmClassGroup {
     }
 }
 
+#[wasm_bindgen(js_name = NodeType)]
+#[derive(Clone, Copy)]
+pub enum WasmNodeType {
+    Hidden,
+    Array,
+    String,
+    Object,
+    Code,
+    Closure,
+    RegExp,
+    Number,
+    Native,
+    Syntheic,
+    ConcatString,
+    SliceString,
+    BigInt,
+    Other,
+}
+
+impl<'a> From<NodeType<'a>> for WasmNodeType {
+    fn from(t: NodeType<'a>) -> Self {
+        match t {
+            NodeType::Hidden => WasmNodeType::Hidden,
+            NodeType::Array => WasmNodeType::Array,
+            NodeType::String => WasmNodeType::String,
+            NodeType::Object => WasmNodeType::Object,
+            NodeType::Code => WasmNodeType::Code,
+            NodeType::Closure => WasmNodeType::Closure,
+            NodeType::RegExp => WasmNodeType::RegExp,
+            NodeType::Number => WasmNodeType::Number,
+            NodeType::Native => WasmNodeType::Native,
+            NodeType::Syntheic => WasmNodeType::Syntheic,
+            NodeType::ConcatString => WasmNodeType::ConcatString,
+            NodeType::SliceString => WasmNodeType::SliceString,
+            NodeType::BigInt => WasmNodeType::BigInt,
+            NodeType::Other(_) => WasmNodeType::Other,
+        }
+    }
+}
+
+#[wasm_bindgen(js_name = EdgeType)]
+#[derive(Clone, Copy)]
+pub enum WasmEdgeType {
+    Context,
+    Element,
+    Property,
+    Internal,
+    Hidden,
+    Shortcut,
+    Weak,
+    Invisible,
+    Other,
+}
+
+impl<'a> From<EdgeType<'a>> for WasmEdgeType {
+    fn from(t: EdgeType<'a>) -> Self {
+        match t {
+            EdgeType::Context => WasmEdgeType::Context,
+            EdgeType::Element => WasmEdgeType::Element,
+            EdgeType::Property => WasmEdgeType::Property,
+            EdgeType::Internal => WasmEdgeType::Internal,
+            EdgeType::Hidden => WasmEdgeType::Hidden,
+            EdgeType::Shortcut => WasmEdgeType::Shortcut,
+            EdgeType::Weak => WasmEdgeType::Weak,
+            EdgeType::Invisible => WasmEdgeType::Invisible,
+            EdgeType::Other(_) => WasmEdgeType::Other,
+        }
+    }
+}
+
 #[wasm_bindgen(js_name = Node)]
 pub struct WasmNode {
     graph: Rc<GraphInner>,
@@ -46,12 +128,37 @@ pub struct WasmNode {
     pub self_size: u64,
     pub retained_size: u64,
     pub index: usize,
-    pub typ: u8,
+    pub typ: WasmNodeType,
     pub id: u32,
 }
 
 #[wasm_bindgen(js_class = Node)]
 impl WasmNode {
+    /// Gets the node's string name.
+    pub fn name(&self) -> String {
+        self.graph.borrow().raw_nodes()[self.index]
+            .weight
+            .name
+            .to_string()
+    }
+}
+
+#[wasm_bindgen(js_name = RetainerNode)]
+pub struct WasmRetainerNode {
+    graph: Rc<GraphInner>,
+
+    pub retains_index: usize,
+    pub children_len: usize,
+    pub self_size: u64,
+    pub retained_size: u64,
+    pub index: usize,
+    pub typ: WasmNodeType,
+    pub id: u32,
+    pub edge_typ: WasmEdgeType,
+}
+
+#[wasm_bindgen(js_class = RetainerNode)]
+impl WasmRetainerNode {
     /// Gets the node's string name.
     pub fn name(&self) -> String {
         self.graph.borrow().raw_nodes()[self.index]
@@ -109,12 +216,32 @@ impl<'a> PartialOrd for SortedNode<'a> {
 impl Graph {
     /// Gets a range of class groups, sorted by retained size.
     #[wasm_bindgen(js_name = get_class_groups)]
-    pub fn get_class_groups_wasm(&self, start: usize, end: usize) -> Vec<WasmClassGroup> {
-        let groups = self.get_class_groups(false);
+    pub fn get_class_groups_wasm(
+        &self,
+        start: usize,
+        end: usize,
+        no_retained: bool,
+    ) -> Vec<WasmClassGroup> {
+        let groups = self.get_class_groups(no_retained);
         groups[start..min(end, groups.len())]
             .iter()
             .map(|g| WasmClassGroup::new(g, self.inner.clone()))
             .collect()
+    }
+
+    /// Gets a count of nodes of each class name
+    #[wasm_bindgen(js_name = get_class_counts)]
+    pub fn get_class_counts_wasm(&self, class_names: Vec<String>) -> Vec<u32> {
+        let mut out = vec![0; class_names.len()];
+
+        for node in self.nodes().iter() {
+            let cn = node.weight.class_name();
+            if let Some(index) = class_names.iter().position(|n| n == cn) {
+                out[index] += 1;
+            }
+        }
+
+        out
     }
 
     #[wasm_bindgen(js_name = class_children)]
@@ -149,6 +276,64 @@ impl Graph {
         let children = self.graph().edges(petgraph::graph::NodeIndex::new(parent));
         self.children_of_something(children.map(|c| c.target()), start, end, sort_by)
     }
+
+    /// Gets all nodes that retain the given index. Each structure returns
+    /// what node it retains; the queried node retains itself.
+    #[wasm_bindgen(js_name = get_all_retainers)]
+    pub fn get_all_retainers_wasm(
+        &self,
+        index: usize,
+        max_distance: usize,
+    ) -> Vec<WasmRetainerNode> {
+        let graph = self.graph();
+        let mut out = vec![];
+
+        let mut q = VecDeque::new();
+        let mut visited = HashSet::new();
+        q.push_front((
+            0,
+            index,
+            WasmEdgeType::Internal,
+            petgraph::graph::NodeIndex::new(index),
+        ));
+
+        while let Some((distance, retains_index, edge_typ, i)) = q.pop_front() {
+            if let Some(n) = graph.node_weight(i) {
+                out.push(WasmRetainerNode {
+                    graph: self.inner.clone(),
+                    index: i.index(),
+                    id: n.id,
+                    children_len: n.edge_count,
+                    typ: n.typ.into(),
+                    retained_size: self.retained_size(i.index()),
+                    self_size: n.self_size,
+                    retains_index,
+                    edge_typ,
+                });
+            }
+
+            if distance == max_distance {
+                continue;
+            }
+
+            for edge in graph.edges_directed(i, petgraph::Direction::Incoming) {
+                let src_index = edge.source().index();
+                if visited.contains(&src_index) {
+                    continue;
+                }
+
+                visited.insert(src_index);
+                let typ = edge.weight().typ;
+                if src_index == self.root_index || !self.is_essential_edge(src_index, &typ) {
+                    continue;
+                }
+
+                q.push_back((distance + 1, i.index(), typ.into(), edge.source()))
+            }
+        }
+
+        out
+    }
 }
 
 impl Graph {
@@ -174,7 +359,7 @@ impl Graph {
                 node: graph.node_weight(child).unwrap(),
                 index: child.index(),
                 sort: sort_by,
-                retained_size: 0,
+                retained_size: self.retained_size(child.index()),
             };
 
             heap.push(sorted);
@@ -188,7 +373,7 @@ impl Graph {
         // off the greatest nodes (which we know are the ones of interest
         // because we enforce the max heap size in the above loop) and then
         // reverse them.
-        let mut result = Vec::with_capacity(min(start - end, heap.len()));
+        let mut result = Vec::with_capacity(min(end - start, heap.len()));
         for _ in start..end {
             if let Some(n) = heap.pop() {
                 result.push(WasmNode {

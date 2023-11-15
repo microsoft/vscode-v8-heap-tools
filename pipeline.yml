@@ -1,0 +1,72 @@
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include:
+      - main
+pr: none
+
+resources:
+  repositories:
+    - repository: templates
+      type: github
+      name: microsoft/vscode-engineering
+      ref: main
+      endpoint: Monaco
+
+parameters:
+  - name: publishPackage
+    displayName: 🚀 Publish v8-heap-parser
+    type: boolean
+    default: false
+
+  - name: channel
+    displayName: 🚀 Rust channel
+    type: string
+    default: 1.73
+
+extends:
+  template: azure-pipelines/npm-package/pipeline.yml@templates
+  parameters:
+    npmPackages:
+      - name: v8-heap-parser
+        ghCreateTag: false
+        workingDirectory: v8-heap-parser
+
+        buildSteps:
+          - task: RustInstaller@1
+            inputs:
+              rustVersion: ms-${{ parameters.channel }}
+              cratesIoFeedOverride: sparse+https://pkgs.dev.azure.com/monacotools/Monaco/_packaging/vscode/Cargo/index/
+              additionalTargets: wasm32-unknown-unknown
+              toolchainFeed: https://pkgs.dev.azure.com/monacotools/Monaco/_packaging/vscode/nuget/v3/index.json
+              default: true
+              addToPath: true
+            displayName: Install Rust
+
+          - script: cargo install wasm-pack
+            displayName: 🦀 Install wasm-pack
+
+          # compile is done in `prepack`
+
+        testPlatforms:
+          - name: Linux
+
+        testSteps:
+          - task: RustInstaller@1
+            inputs:
+              rustVersion: ms-${{ parameters.channel }}
+              cratesIoFeedOverride: sparse+https://pkgs.dev.azure.com/monacotools/Monaco/_packaging/vscode/Cargo/index/
+              additionalTargets: wasm32-unknown-unknown
+              toolchainFeed: https://pkgs.dev.azure.com/monacotools/Monaco/_packaging/vscode/nuget/v3/index.json
+              default: true
+              addToPath: true
+            displayName: Install Rust
+
+          - script: cd .. && cargo test
+            displayName: 🦀 Test
+
+          - script: cd .. && cargo test
+            displayName: 📎 Clippy
+
+        publishPackage: ${{ parameters.publishPackage }}
