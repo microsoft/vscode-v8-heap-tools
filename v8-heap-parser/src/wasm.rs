@@ -8,7 +8,7 @@ use petgraph::visit::EdgeRef;
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    decoder::{GraphInner, NodeType},
+    decoder::{NodeType, PetGraph},
     ClassGroup, EdgeType, Graph, Node,
 };
 
@@ -19,7 +19,7 @@ pub fn init_panic_hook() {
 
 #[wasm_bindgen(js_name = ClassGroup)]
 pub struct WasmClassGroup {
-    graph: Rc<GraphInner>,
+    graph: Rc<PetGraph>,
     first_index: usize,
 
     pub self_size: u64,
@@ -28,7 +28,7 @@ pub struct WasmClassGroup {
 }
 
 impl WasmClassGroup {
-    fn new(group: &ClassGroup, graph: Rc<GraphInner>) -> Self {
+    fn new(group: &ClassGroup, graph: Rc<PetGraph>) -> Self {
         Self {
             graph,
             first_index: group.index,
@@ -43,7 +43,7 @@ impl WasmClassGroup {
 impl WasmClassGroup {
     /// Gets the node's string name.
     pub fn name(&self) -> String {
-        self.graph.borrow().raw_nodes()[self.first_index]
+        self.graph.raw_nodes()[self.first_index]
             .weight
             .class_name()
             .to_string()
@@ -69,8 +69,8 @@ pub enum WasmNodeType {
     Other,
 }
 
-impl<'a> From<NodeType<'a>> for WasmNodeType {
-    fn from(t: NodeType<'a>) -> Self {
+impl From<NodeType> for WasmNodeType {
+    fn from(t: NodeType) -> Self {
         match t {
             NodeType::Hidden => WasmNodeType::Hidden,
             NodeType::Array => WasmNodeType::Array,
@@ -104,8 +104,8 @@ pub enum WasmEdgeType {
     Other,
 }
 
-impl<'a> From<EdgeType<'a>> for WasmEdgeType {
-    fn from(t: EdgeType<'a>) -> Self {
+impl From<EdgeType> for WasmEdgeType {
+    fn from(t: EdgeType) -> Self {
         match t {
             EdgeType::Context => WasmEdgeType::Context,
             EdgeType::Element => WasmEdgeType::Element,
@@ -122,7 +122,7 @@ impl<'a> From<EdgeType<'a>> for WasmEdgeType {
 
 #[wasm_bindgen(js_name = Node)]
 pub struct WasmNode {
-    graph: Rc<GraphInner>,
+    graph: Rc<PetGraph>,
 
     pub children_len: usize,
     pub self_size: u64,
@@ -136,16 +136,13 @@ pub struct WasmNode {
 impl WasmNode {
     /// Gets the node's string name.
     pub fn name(&self) -> String {
-        self.graph.borrow().raw_nodes()[self.index]
-            .weight
-            .name
-            .to_string()
+        self.graph.raw_nodes()[self.index].weight.name().to_string()
     }
 }
 
 #[wasm_bindgen(js_name = RetainerNode)]
 pub struct WasmRetainerNode {
-    graph: Rc<GraphInner>,
+    graph: Rc<PetGraph>,
 
     pub retains_index: usize,
     pub children_len: usize,
@@ -161,10 +158,7 @@ pub struct WasmRetainerNode {
 impl WasmRetainerNode {
     /// Gets the node's string name.
     pub fn name(&self) -> String {
-        self.graph.borrow().raw_nodes()[self.index]
-            .weight
-            .name
-            .to_string()
+        self.graph.raw_nodes()[self.index].weight.name().to_string()
     }
 }
 
@@ -181,7 +175,7 @@ struct SortedNode<'a> {
     sort: WasmSortBy,
     index: usize,
     retained_size: u64,
-    node: &'a Node<'a>,
+    node: &'a Node,
 }
 
 impl<'a> PartialEq for SortedNode<'a> {
@@ -189,7 +183,7 @@ impl<'a> PartialEq for SortedNode<'a> {
         match self.sort {
             WasmSortBy::SelfSize => self.node.self_size == other.node.self_size,
             WasmSortBy::RetainedSize => self.retained_size == other.retained_size,
-            WasmSortBy::Name => self.node.name == other.node.name,
+            WasmSortBy::Name => self.node.name() == other.node.name(),
         }
     }
 }
@@ -201,7 +195,7 @@ impl<'a> Ord for SortedNode<'a> {
         match self.sort {
             WasmSortBy::SelfSize => self.node.self_size.cmp(&other.node.self_size).reverse(),
             WasmSortBy::RetainedSize => self.retained_size.cmp(&other.retained_size).reverse(),
-            WasmSortBy::Name => self.node.name.cmp(other.node.name),
+            WasmSortBy::Name => self.node.name().cmp(other.node.name()),
         }
     }
 }

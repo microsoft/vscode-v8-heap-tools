@@ -7,13 +7,13 @@ use v8_heap_parser::{ClassGroup, Graph, Node};
 
 struct TopLevelGroup<'a> {
     group: &'a ClassGroup,
-    root: &'a Node<'a>,
+    root: &'a Node,
 }
 
 struct NodeWithSize<'a> {
     retained_size: u64,
     index: usize,
-    node: &'a Node<'a>,
+    node: &'a Node,
 }
 
 trait SummarizableNode {
@@ -56,7 +56,7 @@ impl<'a> SummarizableNode for NodeWithSize<'a> {
     }
 
     fn name(&self) -> &str {
-        self.node.name
+        self.node.name()
     }
 
     fn retained_size(&self) -> u64 {

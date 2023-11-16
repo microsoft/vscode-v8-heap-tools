@@ -15,7 +15,7 @@ pub enum Error {
     #[error("could not read input")]
     CouldNotReadInput(std::io::Error),
     #[error(transparent)]
-    FromHeap(#[from] v8_heap_parser::Error),
+    FromHeap(#[from] serde_json::Error),
 }
 
 fn main() -> Result<(), Error> {
