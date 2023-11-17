@@ -47,8 +47,9 @@ pub struct Graph {
     // which makes V8 very happy. In native code, we can do things a little more
     // efficiently, but there's still chunks of the graph that mirror devtools and
     // could be made more idiomatic.
-    pub(crate) inner: Rc<GraphInner>,
+    pub(crate) inner: Rc<PetGraph>,
     pub root_index: usize,
+    strings: Rc<Vec<String>>,
     dominators: UnsafeCell<Option<Vec<usize>>>,
     retained_sizes: UnsafeCell<Option<Vec<u64>>>,
     flags: UnsafeCell<Option<Flags>>,
@@ -73,10 +74,11 @@ impl Flags {
 }
 
 impl Graph {
-    pub(crate) fn new(inner: GraphInner, root_index: usize) -> Self {
+    pub(crate) fn new(inner: PetGraph, root_index: usize, strings: Rc<Vec<String>>) -> Self {
         Self {
             inner: Rc::new(inner),
             root_index,
+            strings,
             dominators: UnsafeCell::new(None),
             retained_sizes: UnsafeCell::new(None),
             retainers: UnsafeCell::new(None),
@@ -88,25 +90,27 @@ impl Graph {
     }
 
     /// Gets a list of all nodes in the graph.
-    pub fn nodes(&self) -> &[petgraph::graph::Node<Node<'_>>] {
-        self.inner.borrow().raw_nodes()
+    pub fn nodes(&self) -> &[petgraph::graph::Node<Node>] {
+        self.inner.raw_nodes()
     }
 
     /// Gets a node by its index.
-    pub fn get_node(&self, index: usize) -> Option<&Node<'_>> {
-        self.inner
-            .borrow()
-            .raw_nodes()
-            .get(index)
-            .map(|n| &n.weight)
+    pub fn get_node(&self, index: usize) -> Option<&Node> {
+        self.inner.raw_nodes().get(index).map(|n| &n.weight)
     }
 
-    pub(crate) fn graph(&self) -> &PetGraph<'_> {
-        self.inner.borrow()
+    /// Gets a string by its index. Indexed strings are exposed in the 'Other'
+    /// type in Node and Edge types.
+    pub fn get_indexed_string(&self, index: usize) -> Option<&str> {
+        self.strings.get(index).map(|s| s.as_str())
+    }
+
+    pub(crate) fn graph(&self) -> &PetGraph {
+        &self.inner
     }
 
     /// Gets an iterator over the graph nodes.
-    pub fn iter(&self) -> NodeIterator<'_, '_> {
+    pub fn iter(&self) -> NodeIterator<'_> {
         NodeIterator {
             graph: self.graph(),
             index: 0,
@@ -125,7 +129,7 @@ impl Graph {
 
     /// Gets the retained size of a node in the graph. This is the size this
     /// node specifically requires the program to retain., i.e. the nodes
-    /// the given node dominates https://en.wikipedia.org/wiki/Dominator_(graph_theory)
+    /// the given node dominates <https://en.wikipedia.org/wiki/Dominator_(graph_theory)>
     pub fn retained_size(&self, node_index: usize) -> u64 {
         let retained_sizes = unsafe { &mut *self.retained_sizes.get() };
 
@@ -333,7 +337,7 @@ impl Graph {
         dominators.as_ref().unwrap()
     }
 
-    pub(crate) fn is_essential_edge(&self, index: usize, typ: &EdgeType<'_>) -> bool {
+    pub(crate) fn is_essential_edge(&self, index: usize, typ: &EdgeType) -> bool {
         if let EdgeType::Weak = typ {
             return false;
         }
@@ -363,7 +367,7 @@ impl Graph {
     fn mark_detached_dom_tree_nodes(&self, flags: &mut [u8]) {
         for (index, node) in self.graph().raw_nodes().iter().enumerate() {
             if let NodeType::Native = node.weight.typ {
-                if node.weight.name.starts_with("Detached ") {
+                if node.weight.name().starts_with("Detached ") {
                     flags[index] |= flag::DETACHED_DOM_TREE_NODE;
                 }
             }
@@ -689,13 +693,13 @@ impl Graph {
     }
 }
 
-pub struct NodeIterator<'a, 'graph> {
-    graph: &'graph PetGraph<'a>,
+pub struct NodeIterator<'graph> {
+    graph: &'graph PetGraph,
     index: usize,
 }
 
-impl<'a, 'graph> Iterator for NodeIterator<'a, 'graph> {
-    type Item = &'graph Node<'a>;
+impl<'graph> Iterator for NodeIterator<'graph> {
+    type Item = &'graph Node;
 
     fn next(&mut self) -> Option<Self::Item> {
         let n = self.graph.raw_nodes().get(self.index).map(|n| &n.weight);
