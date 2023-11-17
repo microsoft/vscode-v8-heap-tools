@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
 thiserror = "1.0"
-v8-heap-parser = { version = "0.1.0", path = "../v8-heap-parser", features = ["print-perf"]}
+v8-heap-parser = { version = "0.1.0", path = "../v8-heap-parser" }
 serde_json = "1.0"
 num-format = "0.4"
 shlex = "1.2"

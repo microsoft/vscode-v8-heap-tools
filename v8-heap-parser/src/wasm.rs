@@ -162,6 +162,31 @@ impl WasmRetainerNode {
     }
 }
 
+#[wasm_bindgen(js_name = RetainerNode)]
+pub struct WasmRetainerNode {
+    graph: Rc<GraphInner>,
+
+    pub retains_index: usize,
+    pub children_len: usize,
+    pub self_size: u64,
+    pub retained_size: u64,
+    pub index: usize,
+    pub typ: WasmNodeType,
+    pub id: u32,
+    pub edge_typ: WasmEdgeType,
+}
+
+#[wasm_bindgen(js_class = RetainerNode)]
+impl WasmRetainerNode {
+    /// Gets the node's string name.
+    pub fn name(&self) -> String {
+        self.graph.borrow().raw_nodes()[self.index]
+            .weight
+            .name
+            .to_string()
+    }
+}
+
 #[derive(Clone, Copy)]
 #[wasm_bindgen]
 
