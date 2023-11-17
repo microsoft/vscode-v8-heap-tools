@@ -131,8 +131,12 @@ impl<'de> Visitor<'de> for RootVisitor {
             return Err(de::Error::missing_field("edges"));
         }
         let snapshot = snapshot.ok_or_else(|| de::Error::missing_field("snapshot"))?;
-        let graph = graph.ok_or_else(|| de::Error::missing_field("nodes"))?;
+        let mut graph = graph.ok_or_else(|| de::Error::missing_field("nodes"))?;
         let strings = Rc::new(strings.ok_or_else(|| de::Error::missing_field("strings"))?);
+
+        for node in graph.node_weights_mut() {
+            node.strings = Some(strings.clone());
+        }
 
         Ok(Root {
             snapshot,
