@@ -131,21 +131,8 @@ impl<'de> Visitor<'de> for RootVisitor {
             return Err(de::Error::missing_field("edges"));
         }
         let snapshot = snapshot.ok_or_else(|| de::Error::missing_field("snapshot"))?;
-        let mut graph = graph.ok_or_else(|| de::Error::missing_field("nodes"))?;
+        let graph = graph.ok_or_else(|| de::Error::missing_field("nodes"))?;
         let strings = Rc::new(strings.ok_or_else(|| de::Error::missing_field("strings"))?);
-
-        // now that we have strings, fix the type of nodes and edges
-        for node in graph.node_weights_mut() {
-            node.strings = Some(strings.clone());
-            if let NodeType::Other(i) = node.typ {
-                node.typ = NodeType::from_str(&strings, i);
-            }
-        }
-        for edge in graph.edge_weights_mut() {
-            if let EdgeType::Other(i) = edge.typ {
-                edge.typ = EdgeType::from_str(&strings, i);
-            }
-        }
 
         Ok(Root {
             snapshot,
