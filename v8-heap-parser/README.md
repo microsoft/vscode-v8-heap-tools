@@ -1,9 +1,12 @@
 # @vscode/v8-heap-parser
 
-This repository contains tools to view and parse V8 heap snapshots. This provides programmatic and command-line access to the data you would normally see in the browser devtools. There are two packages:
+[![crates.io](https://img.shields.io/crates/v/v8-heap-parser.svg)](https://crates.io/crates/v8-heap-parser)
+[![Documentation](https://docs.rs/v8-heap-parser/badge.svg)](https://docs.rs/v8-heap-parser)
+[![BSD-3-Clause](https://img.shields.io/crates/l/v8-heap-parser.svg)](./LICENSE)
 
-- `v8-heap-cli`: a command-line that allows parsing and summarizing a `.heapsnapshot` file
-- `v8-heap-parser`: a Rust library, which is also compiled to WebAssembly and installable as `npm install @vscode/v8-heap-parser`, that allows inspecting the heap.
+This package contains a library to parse and analyze V8 heap snapshots. It is published both as a [Rust crate](https://crates.io/crates/v8-heap-parser) and [npm package](https://www.npmjs.com/package/@vscode/v8-heap-parser) with WebAssembly bindings. It takes as input in the V8 `.heapshot` format, parses it to a graph structure, and exposes information about that graph.
+
+The APIs exposed by the Rust package and JavaScript package are separate: heap snapshots are very large, and we have optimized the JavaScript bindings for usage in VS Code's visualization tools. However, if there's more information you need from the bindings, please make a pull requeset!
 
 ## Contributing
 
