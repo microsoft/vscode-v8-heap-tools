@@ -2,6 +2,10 @@
 name = "v8-heap-parser"
 version = "0.1.0"
 edition = "2021"
+license = "BSD-3-Clause"
+homepage = "https://github.com/microsoft/vscode-v8-heap-tools"
+documentation = "https://docs.rs/v8-heap-parser"
+description = "A library for parsing V8 heap snapshots"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -20,4 +24,4 @@ opt-level = 's'
 lto = true
 
 [features]
-print-perf = []
+# print-perf = []
