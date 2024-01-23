@@ -1,8 +1,16 @@
 {
   "name": "@vscode/v8-heap-parser",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Parses V8 heap snapshots",
   "main": "pkg/nodejs/v8_heap_parser.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/microsoft/vscode-v8-heap-tools.git"
+  },
+  "bugs": {
+    "url": "https://github.com/microsoft/vscode-v8-heap-tools/issues"
+  },
+  "homepage": "https://github.com/microsoft/vscode-v8-heap-tools#readme",
   "exports": {
     "bundler": "./pkg/bundler/v8_heap_parser.js",
     "node": "./pkg/nodejs/v8_heap_parser.js",
