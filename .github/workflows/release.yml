@@ -20,7 +20,7 @@ jobs:
           - target: x86_64-apple-darwin
             archive: zip
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
 
       - name: Compile and release
         uses: rust-build/rust-build.action@v1.4.4
@@ -30,4 +30,4 @@ jobs:
           SRC_DIR: v8-heap-cli
           RUSTTARGET: ${{ matrix.target }}
           EXTRA_FILES: "v8-heap-cli/readme.md LICENSE"
-          TOOLCHAIN_VERSION: 1.73
+          TOOLCHAIN_VERSION: stable
