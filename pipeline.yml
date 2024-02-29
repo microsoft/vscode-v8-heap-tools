@@ -23,7 +23,7 @@ parameters:
   - name: channel
     displayName: 🚀 Rust channel
     type: string
-    default: 1.73
+    default: 1.76
 
 extends:
   template: azure-pipelines/npm-package/pipeline.yml@templates
