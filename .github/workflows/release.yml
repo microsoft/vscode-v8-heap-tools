@@ -20,10 +20,10 @@ jobs:
           - target: x86_64-apple-darwin
             archive: zip
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.4
+        uses: rust-build/rust-build.action@58ff99792e9c81ac6581731903d1a3d3f9c399f9 # v1.4.4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
